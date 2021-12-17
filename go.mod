@@ -18,23 +18,13 @@ require (
 	github.com/submariner-io/shipyard v0.12.0-m1
 	github.com/uw-labs/lichen v0.1.4
 	go.uber.org/zap v1.15.0 // indirect
-	k8s.io/api v0.21.0
-	k8s.io/apimachinery v0.21.0
-	k8s.io/client-go v11.0.0+incompatible
+	k8s.io/api v0.20.2
+	k8s.io/apimachinery v0.20.2
+	k8s.io/client-go v0.20.2
 	k8s.io/klog v1.0.0
-	k8s.io/klog/v2 v2.4.0 // indirect
 	k8s.io/utils v0.0.0-20210305010621-2afb4311ab10
 	sigs.k8s.io/controller-runtime v0.6.5
 	sigs.k8s.io/mcs-api v0.1.0
-)
-
-// Pinned to kubernetes-1.19.10
-replace (
-	k8s.io/api => k8s.io/api v0.19.10
-	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.19.10
-	k8s.io/apimachinery => k8s.io/apimachinery v0.19.10
-	k8s.io/client-go => k8s.io/client-go v0.19.10
-	k8s.io/cloud-provider => k8s.io/cloud-provider v0.19.10
 )
 
 // Pinned for coredns
