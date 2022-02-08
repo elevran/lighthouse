@@ -98,7 +98,11 @@ func (m *Map) Put(es *discovery.EndpointSlice) {
 		return
 	}
 
-	cluster, ok := es.Labels[constants.LabelSourceCluster]
+	cluster, ok := es.Labels[constants.MCSLabelSourceCluster]
+
+	if !ok {
+		cluster, ok = es.Labels[constants.LighthouseLabelSourceCluster]
+	}
 
 	if !ok {
 		klog.Warningf("Cluster label missing on %#v", es.ObjectMeta)
@@ -165,7 +169,11 @@ func (m *Map) Put(es *discovery.EndpointSlice) {
 func (m *Map) Remove(es *discovery.EndpointSlice) {
 	key, ok := getKey(es)
 	if ok {
-		cluster, ok := es.Labels[constants.LabelSourceCluster]
+		cluster, ok := es.Labels[constants.MCSLabelSourceCluster]
+
+		if !ok {
+			cluster, ok = es.Labels[constants.LighthouseLabelSourceCluster]
+		}
 
 		if !ok {
 			return
@@ -193,7 +201,11 @@ func (m *Map) get(key string) *endpointInfo {
 }
 
 func getKey(es *discovery.EndpointSlice) (string, bool) {
-	name, ok := es.Labels[constants.LabelSourceName]
+	name, ok := es.Labels[constants.MCSLabelServiceName]
+
+	if !ok {
+		name, ok = es.Labels[constants.LighthouseLabelSourceName]
+	}
 
 	if !ok {
 		return "", false
