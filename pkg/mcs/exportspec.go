@@ -23,8 +23,8 @@ type ExportSpec struct {
 	Namespace string `json:"ns"`
 	// Name indicates the original ServiceExport object name.
 	Name string `json:"name"`
-	// Properties includes the global properties of the exported Service
-	Properties GlobalProperties `json:"globalProperties"`
+	// Service includes the global properties of the exported Service
+	Service GlobalProperties `json:"globalProperties"`
 }
 
 // GlobalProperties holds the global Service properties as defined by KEP-1645.
@@ -50,8 +50,8 @@ const (
 func NewExportSpec(svc *corev1.Service, export *mcsv1a1.ServiceExport,
 	cluster string) (*ExportSpec, error) {
 
-	if svc == nil || export == nil || cluster == "" || svc.Namespace != export.Namespace ||
-		svc.Name != export.Name {
+	if svc == nil || export == nil || cluster == "" ||
+		svc.Namespace != export.Namespace || svc.Name != export.Name {
 		return nil, os.ErrInvalid
 	}
 
@@ -60,7 +60,7 @@ func NewExportSpec(svc *corev1.Service, export *mcsv1a1.ServiceExport,
 		ClusterID: cluster,
 		Namespace: export.Namespace,
 		Name:      export.Name,
-		Properties: GlobalProperties{
+		Service: GlobalProperties{
 			Type:                  mcsv1a1.ClusterSetIP,
 			SessionAffinity:       svc.Spec.SessionAffinity,
 			SessionAffinityConfig: svc.Spec.SessionAffinityConfig,
@@ -68,11 +68,11 @@ func NewExportSpec(svc *corev1.Service, export *mcsv1a1.ServiceExport,
 	}
 
 	if svc.Spec.ClusterIP == corev1.ClusterIPNone {
-		es.Properties.Type = mcsv1a1.Headless
+		es.Service.Type = mcsv1a1.Headless
 	}
 
 	for _, p := range svc.Spec.Ports {
-		es.Properties.Ports = append(es.Properties.Ports, mcsv1a1.ServicePort{
+		es.Service.Ports = append(es.Service.Ports, mcsv1a1.ServicePort{
 			Port:        p.Port,
 			Name:        p.Name,
 			Protocol:    p.Protocol,
@@ -140,20 +140,20 @@ func (es *ExportSpec) IsPrefferredOver(another *ExportSpec) bool {
 // false and the name of the conflicting field.
 // @todo do we want to collect a map of the conflicting Global Properties?
 func (es *ExportSpec) IsCompatibleWith(another *ExportSpec) (bool, string) {
-	if es.Properties.Type != another.Properties.Type {
+	if es.Service.Type != another.Service.Type {
 		return false, "type"
-	} else if es.Properties.SessionAffinity != another.Properties.SessionAffinity {
+	} else if es.Service.SessionAffinity != another.Service.SessionAffinity {
 		return false, "affinity"
-	} else if !reflect.DeepEqual(es.Properties.SessionAffinityConfig, another.Properties.SessionAffinityConfig) {
+	} else if !reflect.DeepEqual(es.Service.SessionAffinityConfig, another.Service.SessionAffinityConfig) {
 		return false, "affinityConfig"
 	}
 
-	ports := make(map[string]mcsv1a1.ServicePort, len(es.Properties.Ports))
-	for _, p := range es.Properties.Ports {
+	ports := make(map[string]mcsv1a1.ServicePort, len(es.Service.Ports))
+	for _, p := range es.Service.Ports {
 		ports[p.Name] = p
 	}
 
-	for _, other := range another.Properties.Ports {
+	for _, other := range another.Service.Ports {
 		current, found := ports[other.Name]
 
 		if !found {

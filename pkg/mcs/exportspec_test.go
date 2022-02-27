@@ -2,27 +2,54 @@ package mcs_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	mcsv1a1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	"github.com/submariner-io/lighthouse/pkg/mcs"
 )
 
+var (
+	timeout = int32(10)
+
+	sample = mcs.ExportSpec{
+		CreatedAt: metav1.NewTime(time.Now().UTC()),
+		ClusterID: "cluster",
+		Namespace: "namespace",
+		Name:      "name",
+		Service: mcs.GlobalProperties{
+			Type:            mcsv1a1.ClusterSetIP,
+			SessionAffinity: corev1.ServiceAffinityClientIP,
+			SessionAffinityConfig: &corev1.SessionAffinityConfig{
+				ClientIP: &corev1.ClientIPConfig{
+					TimeoutSeconds: &timeout,
+				},
+			},
+			Ports: []mcsv1a1.ServicePort{
+				{Port: 80, Name: "http", Protocol: corev1.ProtocolTCP},
+			},
+		},
+	}
+)
+
 func TestMarshalUnmarshal(t *testing.T) {
 	testcases := map[string]struct {
-		spec *mcs.ExportSpec
+		expected *mcs.ExportSpec
+		mutate   func(mcs.ExportSpec) *mcs.ExportSpec
 	}{
 		/*
-			"empty":                  {},
-			"missing: timestamp":     {},
-			"missing: cluster":       {},
-			"missing: namespace":     {},
-			"missing: name":          {},
+			"empty": {},
+			"missing: timestamp": {},
+			"missing: cluster": {},
+			"missing: namespace": {},
+			"missing: name": {},
 			"missing: service":       {},
 			"missing: service.type":  {},
 			"missing: service.ports": {},
-			"simple spec":            {},
+			"simple spec": {},
 			"multiple ports":         {},
 		*/
 	}
@@ -33,24 +60,26 @@ func TestMarshalUnmarshal(t *testing.T) {
 		t.Logf("Running test case %s", name)
 
 		md := &metav1.ObjectMeta{}
-		err := test.spec.MarshalObjectMeta(md)
+		test.expected = test.mutate(sample)
+		err := sample.MarshalObjectMeta(md)
 		assertions.NoError(err)
 
-		spec := &mcs.ExportSpec{}
-		err = spec.UnmarshalObjectMeta(md)
+		actual := &mcs.ExportSpec{}
+		err = actual.UnmarshalObjectMeta(md)
 		assertions.NoError(err)
 
-		assertions.Equal(test.spec, spec)
+		assertions.Equal(test.expected, actual)
 	}
 }
 
 func TestCompatibility(t *testing.T) {
 	testcases := map[string]struct {
-		spec  *mcs.ExportSpec
-		other *mcs.ExportSpec
-		field string
+		spec       *mcs.ExportSpec
+		other      *mcs.ExportSpec
+		compatible bool
+		field      string
 	}{
-		"compatible: empty": {spec: &mcs.ExportSpec{}, other: &mcs.ExportSpec{}},
+		"compatible: empty": {spec: &mcs.ExportSpec{}, other: &mcs.ExportSpec{}, compatible: true},
 		/*
 			"compatible: identical":        {},
 			"compatible: local properties": {},
@@ -66,8 +95,8 @@ func TestCompatibility(t *testing.T) {
 		t.Logf("Running test case %s", name)
 
 		compatible, field := test.spec.IsCompatibleWith(test.other)
-		assertions.True(compatible && field == "", "no field expected in conflict")
-		assertions.Equal(field, test.field, "unexpected field conflict detected")
+		assertions.Equal(test.compatible, compatible)
+		assertions.Equal(test.field, field, "unexpected field conflict detected")
 	}
 }
 
@@ -77,16 +106,16 @@ func TestConflictResolutionCriteria(t *testing.T) {
 		other     *mcs.ExportSpec
 		preferred bool
 	}{
-		"different time": {
+		"different time, prefer earlier": {
 			spec: &mcs.ExportSpec{
 				CreatedAt: metav1.Now(),
 			},
 			other: &mcs.ExportSpec{
-				CreatedAt: metav1.Now(),
+				CreatedAt: metav1.NewTime(time.Now().Add(1 * time.Second)),
 			},
 			preferred: true,
 		},
-		"equal time": {
+		"equal time, prefer lesser cluster name": {
 			spec: &mcs.ExportSpec{
 				CreatedAt: metav1.Unix(0, 0),
 				ClusterID: "cluster1",
@@ -105,9 +134,9 @@ func TestConflictResolutionCriteria(t *testing.T) {
 		t.Logf("Running test case %s", name)
 
 		preferred := test.spec.IsPrefferredOver(test.other)
-		assertions.Equal(test.preferred, preferred)
+		assertions.True(test.preferred == preferred || test.spec == test.other)
 		reversed := test.other.IsPrefferredOver(test.spec)
-		assertions.Equal(preferred, !reversed)
+		assertions.True(preferred == !reversed || test.spec == test.other)
 	}
 }
 
