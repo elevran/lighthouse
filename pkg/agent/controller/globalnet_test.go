@@ -17,7 +17,7 @@ limitations under the License.
 */
 package controller_test
 
-//var _ = Describe("Globalnet enabled", func() {
+// var _ = Describe("Globalnet enabled", func() {
 //	var t *testDriver
 //
 //	BeforeEach(func() {
@@ -29,7 +29,7 @@ package controller_test
 //	JustBeforeEach(func() {
 //		t.justBeforeEach()
 //		t.createService()
-//		t.createServiceExport()
+//		t.createLocalServiceExport()
 //	})
 //
 //	AfterEach(func() {
@@ -58,7 +58,7 @@ package controller_test
 //		Context("and it does not initially have a global IP", func() {
 //			Context("due to missing GlobalIngressIP", func() {
 //				It("should update the ServiceExport status appropriately and eventually sync a ServiceImport", func() {
-//					t.awaitServiceExportStatus(0, newServiceExportCondition(corev1.ConditionFalse, "ServiceGlobalIPUnavailable"))
+//					t.awaitServiceExportStatus(0, newServiceExportValidityCondition(corev1.ConditionFalse, "ServiceGlobalIPUnavailable"))
 //
 //					t.createGlobalIngressIP(ingressIP)
 //					t.awaitServiceExported(globalIP1, 1)
@@ -73,10 +73,10 @@ package controller_test
 //				})
 //
 //				It("should update the ServiceExport status appropriately and eventually sync a ServiceImport", func() {
-//					t.awaitServiceExportStatus(0, newServiceExportCondition(corev1.ConditionFalse, "ServiceGlobalIPUnavailable"))
+//					t.awaitServiceExportStatus(0, newServiceExportValidityCondition(corev1.ConditionFalse, "ServiceGlobalIPUnavailable"))
 //
 //					setIngressAllocatedIP(ingressIP, globalIP1)
-//					test.UpdateResource(t.cluster1.localIngressIPClient, ingressIP)
+//					test.UpdateResource(t.cluster1.ingressIPClient, ingressIP)
 //					t.awaitServiceExported(globalIP1, 1)
 //				})
 //			})
@@ -97,7 +97,7 @@ package controller_test
 //			})
 //
 //			It("should update the ServiceExport status with the condition details", func() {
-//				c := newServiceExportCondition(corev1.ConditionFalse, condition.Reason)
+//				c := newServiceExportValidityCondition(corev1.ConditionFalse, condition.Reason)
 //				c.Message = &condition.Message
 //				t.awaitServiceExportStatus(0, c)
 //			})
@@ -110,7 +110,7 @@ package controller_test
 //		})
 //
 //		JustBeforeEach(func() {
-//			t.createEndpoints()
+//			t.createEndpointsOnCluster1()
 //		})
 //
 //		Context("and it has a global IP for all endpoint addresses", func() {
@@ -127,7 +127,7 @@ package controller_test
 //		Context("and it initially does not have a global IP for all endpoint addresses", func() {
 //			It("should eventually sync a ServiceImport and EndpointSlice with the global IPs", func() {
 //				time.Sleep(time.Millisecond * 300)
-//				t.awaitNoEndpointSlice(t.cluster1.localEndpointSliceClient)
+//				t.awaitNoEndpointSliceOnClient(t.cluster1.endpointSliceClient)
 //
 //				t.createEndpointIngressIPs()
 //
@@ -136,4 +136,4 @@ package controller_test
 //			})
 //		})
 //	})
-//})
+// })

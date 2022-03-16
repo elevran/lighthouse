@@ -18,9 +18,9 @@ limitations under the License.
 package controller
 
 import (
-	"github.com/submariner-io/admiral/pkg/federate"
 	"sync"
 
+	"github.com/submariner-io/admiral/pkg/federate"
 	"github.com/submariner-io/admiral/pkg/syncer"
 	"github.com/submariner-io/admiral/pkg/syncer/broker"
 	"github.com/submariner-io/admiral/pkg/watcher"
@@ -69,6 +69,7 @@ type ServiceImportController struct {
 	clusterID            string
 	scheme               *runtime.Scheme
 	globalIngressIPCache *globalIngressIPCache
+	waitForCacheSync     bool
 }
 
 // Each EndpointController listens for the endpoints that backs a service and have a ServiceImport

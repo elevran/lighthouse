@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/submariner-io/admiral/pkg/log"
@@ -42,7 +43,7 @@ import (
 
 func startEndpointController(localClient dynamic.Interface, restMapper meta.RESTMapper, scheme *runtime.Scheme,
 	serviceImport *mcsv1a1.ServiceImport, serviceImportNameSpace, serviceName, clusterID string,
-	globalIngressIPCache *globalIngressIPCache) (*EndpointController, error) {
+	globalIngressIPCache *globalIngressIPCache, waitForCacheSync bool) (*EndpointController, error) {
 	logger.V(log.DEBUG).Info("Starting Endpoints controller for service",
 		"namespace", serviceImportNameSpace, "name", serviceName)
 
@@ -72,8 +73,9 @@ func startEndpointController(localClient dynamic.Interface, restMapper meta.REST
 		RestMapper:          restMapper,
 		Federator:           broker.NewFederator(localClient, restMapper, serviceImportNameSpace, "", "ownerReferences"),
 		ResourceType:        &corev1.Endpoints{},
-		Transform:           controller.endpointsToEndpointSlice,
+		Transform:           controller.endpointsToEndpointSliceTransform,
 		Scheme:              scheme,
+		WaitForCacheSync:    &waitForCacheSync,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating Endpoints syncer")
@@ -126,16 +128,17 @@ func (e *EndpointController) cleanup() {
 	}
 }
 
-func (e *EndpointController) endpointsToEndpointSlice(obj runtime.Object, numRequeues int, op syncer.Operation) (runtime.Object, bool) {
+func (e *EndpointController) endpointsToEndpointSliceTransform(
+	obj runtime.Object, numRequeues int, op syncer.Operation) (runtime.Object, bool) {
 	endPoints := obj.(*corev1.Endpoints)
 
 	endpointSliceName := endPoints.Name + "-" + e.clusterID
 
 	objLogger := logger.WithValues("name", endPoints.Namespace+"/"+endPoints.Name)
 
-	if op == syncer.Delete {
-		objLogger.V(log.DEBUG).Info("Endpoints deleted")
+	objLogger.V(log.DEBUG).Info(fmt.Sprintf("Endpoints Transform: Endpoints was %sd", op), "requeue#", numRequeues)
 
+	if op == syncer.Delete {
 		return &discovery.EndpointSlice{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      endpointSliceName,
@@ -144,16 +147,10 @@ func (e *EndpointController) endpointsToEndpointSlice(obj runtime.Object, numReq
 		}, false
 	}
 
-	if op == syncer.Create {
-		objLogger.V(log.DEBUG).Info("Endpoints created")
-	} else {
-		objLogger.V(log.TRACE).Info("Endpoints updated")
-	}
-
 	return e.endpointSliceFromEndpoints(endPoints, op)
 }
 
-func (e *EndpointController) endpointSliceFromEndpoints(endpoints *corev1.Endpoints, op syncer.Operation) (
+func (e *EndpointController) endpointSliceFromEndpoints(endpoints *corev1.Endpoints, _ syncer.Operation) (
 	runtime.Object, bool) {
 	endpointSlice := &discovery.EndpointSlice{}
 
@@ -197,17 +194,14 @@ func (e *EndpointController) endpointSliceFromEndpoints(endpoints *corev1.Endpoi
 		endpointSlice.Endpoints = append(endpointSlice.Endpoints, newEndpoints...)
 	}
 
-	if op == syncer.Create {
-		logger.V(log.DEBUG).Info("Returning EndpointSlice", "value", endpointSlice)
-	} else {
-		logger.V(log.TRACE).Info("Returning EndpointSlice", "value", endpointSlice)
-	}
+	logger.V(log.TRACE).Info("Returning EndpointSlice:\n" + PrettyPrint(endpointSlice))
 
 	return endpointSlice, false
 }
 
 func (e *EndpointController) getEndpointsFromAddresses(addresses []corev1.EndpointAddress, addressType discovery.AddressType,
 	ready bool) ([]discovery.Endpoint, bool) {
+	//goland:noinspection GoPreferNilSlice
 	endpoints := []discovery.Endpoint{}
 	isIPv6AddressType := addressType == discovery.AddressTypeIPv6
 

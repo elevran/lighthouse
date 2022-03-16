@@ -19,6 +19,7 @@ package controller
 
 import (
 	"fmt"
+
 	"github.com/pkg/errors"
 	"github.com/submariner-io/admiral/pkg/federate"
 	"github.com/submariner-io/admiral/pkg/log"
@@ -34,13 +35,14 @@ import (
 )
 
 func newServiceImportController(spec *AgentSpecification, serviceSyncer syncer.Interface, restMapper meta.RESTMapper,
-	localClient dynamic.Interface, scheme *runtime.Scheme) (*ServiceImportController, error) {
+	localClient dynamic.Interface, scheme *runtime.Scheme, waitForCacheSync bool) (*ServiceImportController, error) {
 	controller := &ServiceImportController{
-		serviceSyncer: serviceSyncer,
-		localClient:   localClient,
-		restMapper:    restMapper,
-		clusterID:     spec.ClusterID,
-		scheme:        scheme,
+		serviceSyncer:    serviceSyncer,
+		localClient:      localClient,
+		restMapper:       restMapper,
+		clusterID:        spec.ClusterID,
+		scheme:           scheme,
+		waitForCacheSync: waitForCacheSync,
 	}
 
 	var err error
@@ -49,16 +51,17 @@ func newServiceImportController(spec *AgentSpecification, serviceSyncer syncer.I
 	// an endpoint controller is created for each service import
 	// the endpoint controller creates a local endpoint slice for each endpoint
 	controller.serviceImportSyncer, err = syncer.NewResourceSyncer(&syncer.ResourceSyncerConfig{
-		Name:            "ServiceImport watcher",
-		SourceClient:    localClient,
-		SourceNamespace: spec.Namespace,
-		Direction:       syncer.None, // we want custom ShouldProcess rules - only imports of this cluster
-		ShouldProcess:   controller.shouldProcessServiceImport,
-		RestMapper:      restMapper,
-		Federator:       federate.NewNoopFederator(),
-		ResourceType:    &mcsv1a1.ServiceImport{},
-		Transform:       controller.serviceImportToEndpointController,
-		Scheme:          scheme,
+		Name:             "ServiceImport watcher",
+		SourceClient:     localClient,
+		SourceNamespace:  spec.Namespace,
+		Direction:        syncer.None, // we want custom ShouldProcess rules - only imports of this cluster
+		ShouldProcess:    controller.shouldProcessServiceImport,
+		RestMapper:       restMapper,
+		Federator:        federate.NewNoopFederator(),
+		ResourceType:     &mcsv1a1.ServiceImport{},
+		Transform:        controller.serviceImportToEndpointController,
+		Scheme:           scheme,
+		WaitForCacheSync: &waitForCacheSync,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating ServiceImport watcher")
@@ -111,7 +114,8 @@ func (c *ServiceImportController) serviceImportCreatedOrUpdated(serviceImport *m
 		return false
 	}
 
-	if serviceImport.GetLabels()[lhconstants.LighthouseLabelSourceCluster] != c.clusterID {
+	labels := serviceImport.GetLabels()
+	if labels[lhconstants.LighthouseLabelSourceCluster] != c.clusterID {
 		return false
 	}
 
@@ -120,7 +124,7 @@ func (c *ServiceImportController) serviceImportCreatedOrUpdated(serviceImport *m
 	serviceName := annotations[lhconstants.OriginName]
 
 	endpointController, err := startEndpointController(c.localClient, c.restMapper, c.scheme,
-		serviceImport, serviceNameSpace, serviceName, c.clusterID, c.globalIngressIPCache)
+		serviceImport, serviceNameSpace, serviceName, c.clusterID, c.globalIngressIPCache, c.waitForCacheSync)
 	if err != nil {
 		logger.Error(err, "Failed to start endpoint controller")
 		return true
@@ -132,7 +136,8 @@ func (c *ServiceImportController) serviceImportCreatedOrUpdated(serviceImport *m
 }
 
 func (c *ServiceImportController) serviceImportDeleted(serviceImport *mcsv1a1.ServiceImport, key string) {
-	if serviceImport.GetLabels()[lhconstants.LighthouseLabelSourceCluster] != c.clusterID {
+	labels := serviceImport.GetLabels()
+	if labels[lhconstants.LighthouseLabelSourceCluster] != c.clusterID {
 		return
 	}
 
@@ -148,7 +153,8 @@ func (c *ServiceImportController) serviceImportToEndpointController(obj runtime.
 	serviceImport := obj.(*mcsv1a1.ServiceImport)
 	key, _ := cache.MetaNamespaceKeyFunc(serviceImport)
 
-	logger.V(log.DEBUG).Info(fmt.Sprintf("ServiceImport %s %sd", key, op))
+	logMsg := fmt.Sprintf("Local ServiceImport Transform: ServiceImport %s was %sd", key, op)
+	logger.V(log.DEBUG).Info(logMsg, "requeue#", numRequeues)
 
 	if op == syncer.Create || op == syncer.Update {
 		return nil, c.serviceImportCreatedOrUpdated(serviceImport, key)

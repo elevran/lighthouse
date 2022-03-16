@@ -19,16 +19,19 @@ package controller_test
 
 import (
 	"errors"
+	"time"
+
 	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	"github.com/submariner-io/admiral/pkg/syncer/test"
 	"github.com/submariner-io/lighthouse/pkg/agent/controller"
+	"github.com/submariner-io/lighthouse/pkg/lhutil"
 	"github.com/submariner-io/lighthouse/pkg/mcs"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	mcsv1a1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
-	"time"
 )
-import . "github.com/onsi/gomega"
 
 var _ = Describe("ServiceExport syncing", func() {
 	var t *testDriver
@@ -50,14 +53,14 @@ var _ = Describe("ServiceExport syncing", func() {
 			It("should update the ServiceExport status and upload to the broker", func() {
 				t.awaitNoServiceExportOnBroker()
 				t.createService()
-				t.createServiceExport()
+				t.createLocalServiceExport()
 				t.awaitServiceExported()
 			})
 		})
 
 		When("the Service doesn't initially exist", func() {
 			It("should initially update the ServiceExport status to not Valid and upload after service is created", func() {
-				t.createServiceExport()
+				t.createLocalServiceExport()
 				t.awaitServiceUnavailableStatus()
 				t.awaitNoServiceExportOnBroker()
 
@@ -70,10 +73,10 @@ var _ = Describe("ServiceExport syncing", func() {
 	When("a ServiceExport is deleted after it was synced", func() {
 		It("should delete the ServiceExport on the Broker", func() {
 			t.createService()
-			t.createServiceExport()
+			t.createLocalServiceExport()
 			t.awaitServiceExported()
 
-			t.deleteServiceExport()
+			t.deleteLocalServiceExport()
 			t.awaitNoServiceExportOnBroker()
 		})
 	})
@@ -81,7 +84,7 @@ var _ = Describe("ServiceExport syncing", func() {
 	When("an exported Service is deleted and recreated while the ServiceExport still exists", func() {
 		It("should delete and recreate the ServiceExport on the broker", func() {
 			t.createService()
-			t.createServiceExport()
+			t.createLocalServiceExport()
 			t.awaitServiceExported()
 
 			t.deleteService()
@@ -100,9 +103,9 @@ var _ = Describe("ServiceExport syncing", func() {
 
 		It("should not update the ServiceExport status to Exported until the sync is successful", func() {
 			t.createService()
-			t.createServiceExport()
+			t.createLocalServiceExport()
 
-			condition := newServiceExportCondition(mcsv1a1.ServiceExportValid, corev1.ConditionFalse, controller.ReasonAwaitingSync)
+			condition := newServiceExportValidityCondition(corev1.ConditionFalse, controller.ReasonAwaitingSync)
 			t.awaitLocalServiceExport(condition)
 
 			t.awaitNoServiceExportOnBroker()
@@ -126,7 +129,7 @@ var _ = Describe("ServiceExport syncing", func() {
 
 		It("should correctly truncate the ServiceExportCondition list", func() {
 			t.createService()
-			t.createServiceExport()
+			t.createLocalServiceExport()
 
 			t.awaitServiceExported()
 
@@ -142,9 +145,9 @@ var _ = Describe("ServiceExport syncing", func() {
 
 		It("should update the ServiceExport status and not sync it", func() {
 			t.createService()
-			t.createServiceExport()
+			t.createLocalServiceExport()
 
-			condition := newServiceExportCondition(mcsv1a1.ServiceExportValid, corev1.ConditionFalse, controller.ReasonUnsupportedServiceType)
+			condition := newServiceExportValidityCondition(corev1.ConditionFalse, controller.ReasonUnsupportedServiceType)
 			t.awaitLocalServiceExport(condition)
 
 			t.awaitNoServiceExportOnBroker()
@@ -169,7 +172,7 @@ var _ = Describe("ServiceExport syncing", func() {
 
 		It("should set the appropriate port information in the ServiceExport", func() {
 			t.createService()
-			t.createServiceExport()
+			t.createLocalServiceExport()
 			t.awaitServiceExported() // t.service.Spec.ClusterIP, 0
 
 			serviceExport := t.awaitBrokerServiceExport(nil)
@@ -181,7 +184,7 @@ var _ = Describe("ServiceExport syncing", func() {
 			Expect(exportSpec.Service.Ports[1].Protocol).To(Equal(corev1.ProtocolSCTP))
 			Expect(exportSpec.Service.Ports[0].Port).To(BeNumerically("==", 123))
 			Expect(exportSpec.Service.Ports[1].Port).To(BeNumerically("==", 1234))
-			Expect(time.Now().Sub(exportSpec.CreatedAt.Time)).To(BeNumerically("<", 60*time.Second))
+			Expect(time.Since(exportSpec.CreatedAt.Time)).To(BeNumerically("<", 60*time.Second))
 		})
 	})
 
@@ -191,14 +194,97 @@ var _ = Describe("ServiceExport syncing", func() {
 	When("a conflict initially occurs when updating the ServiceExport status", func() {
 		BeforeEach(func() {
 			err := apierrors.NewConflict(schema.GroupResource{}, t.serviceExport.Name, errors.New("fake conflict"))
-			t.cluster1.localServiceExportClient.FailOnUpdate = err
+			t.cluster1.serviceExportClient.FailOnUpdate = err
 		})
 
 		It("should eventually update the ServiceExport status", func() {
 			t.createService()
-			t.createServiceExport()
+			t.createLocalServiceExport()
 			t.awaitServiceExported()
 		})
 	})
 
+	When("hub updates service export conflict status", func() {
+		It("only condition of conflict status shall be updated on local export", func() {
+			logger.Info("Sync export to broker")
+			t.createService()
+			t.createLocalServiceExport()
+			t.awaitServiceExported()
+			brokerExport := t.awaitBrokerServiceExport(nil)
+
+			logger.Info("Create a condition other than conflict on broker - should not be downloaded to spoke")
+			cond := lhutil.CreateServiceExportCondition(mcsv1a1.ServiceExportValid,
+				corev1.ConditionFalse, "other reason", "other message")
+			t.addBrokerServiceExportCondition(brokerExport, cond)
+			time.Sleep(300 * time.Millisecond)
+			localServiceExport := t.awaitLocalServiceExport(nil)
+			t.awaitServiceExported()
+			Expect(lhutil.GetServiceExportCondition(&localServiceExport.Status, mcsv1a1.ServiceExportConflict)).To(BeNil())
+
+			logger.Info("Create conflict condition - should be downloaded")
+			cond =
+				lhutil.CreateServiceExportCondition(mcsv1a1.ServiceExportConflict,
+					corev1.ConditionTrue, "protocol conflict", "export conflict found")
+			t.addBrokerServiceExportCondition(brokerExport, cond)
+			t.awaitBrokerServiceExport(cond)
+			t.awaitLocalServiceExport(cond)
+
+			logger.Info("Resolve conflict condition - should be downloaded")
+			cond = lhutil.CreateServiceExportCondition(mcsv1a1.ServiceExportConflict,
+				corev1.ConditionFalse, "protocol conflict resolved", "export conflict resolved")
+			t.addBrokerServiceExportCondition(brokerExport, cond)
+			t.awaitBrokerServiceExport(cond)
+			t.awaitLocalServiceExport(cond)
+		})
+	})
+
+	When("local service export is deleted out of band after sync", func() {
+		It("should delete it from the broker datastore on reconciliation", func() {
+			// simulate sync to broker to get the export state as it should be on the broker
+			t.createService()
+			t.createLocalServiceExport()
+			t.awaitServiceExported()
+			brokerServiceExport := t.awaitBrokerServiceExport(nil)
+
+			t.afterEach()                                                         // stop agent controller on all clusters
+			t = newTestDriver()                                                   // create a new driver - data stores are now empty
+			test.CreateResource(t.brokerServiceExportClient, brokerServiceExport) // create export on broker only
+			t.createService()                                                     // recreate service so that only local export is missing
+			t.justBeforeEach()                                                    // start agent controller on all clusters
+			t.awaitNoServiceExportOnBroker()                                      // ensure that the export is deleted from broker
+			t.createLocalServiceExport()                                          // recreate local export online
+			t.awaitServiceExported()                                              // ensure export is synced to broker
+		})
+	})
+
+	When("local service is deleted out of band after sync", func() {
+		It("should delete export from the broker datastore on reconciliation", func() {
+			// simulate sync to broker to get the export state as it should be on the broker
+			t.createService()
+			t.createLocalServiceExport()
+			t.awaitServiceExported()
+			brokerServiceExport := t.awaitBrokerServiceExport(nil)
+
+			t.afterEach()                                                         // stop agent controller on all clusters
+			t = newTestDriver()                                                   // create a new driver - data stores are now empty
+			test.CreateResource(t.brokerServiceExportClient, brokerServiceExport) // create export on broker only
+
+			t.justBeforeEach()               // start agent controller on all clusters, both export and service are missing
+			t.awaitNoServiceExportOnBroker() // ensure that the export is deleted from broker
+			t.createLocalServiceExport()     // recreate local export online
+			t.createService()                // recreate local service online
+			t.awaitServiceExported()         // ensure export is synced to broker
+		})
+	})
+
+	When("local service and service export are created out of band", func() {
+		It("should sync export to the broker datastore on reconciliation", func() {
+			t.afterEach()                // stop agent controller on all clusters
+			t = newTestDriver()          // create a new driver - data stores are now empty
+			t.createService()            // create local service oob
+			t.createLocalServiceExport() // recreate local export online
+			t.justBeforeEach()           // start agent controller on all clusters, both export and service are missing
+			t.awaitServiceExported()     // ensure export is synced to broker
+		})
+	})
 })
