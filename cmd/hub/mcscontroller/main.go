@@ -46,6 +46,10 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+const (
+	ENV_NAMESPACE = "NAMESPACE"
+)
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(mcsv1a1.AddToScheme(scheme))
@@ -63,7 +67,8 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.StringVar(&namespace, "ns", corev1.NamespaceAll, "namespace to watch, defaults to NAMESPACE environment")
+	flag.StringVar(&namespace, "ns", os.Getenv(ENV_NAMESPACE),
+		"namespace to watch, defaults to "+ENV_NAMESPACE+" environment variable")
 
 	// Add the zap logger flag set to the CLI. The flag set must
 	// be added before calling flag.Parse().
@@ -73,7 +78,7 @@ func main() {
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	if namespace == "" {
+	if namespace == corev1.NamespaceAll {
 		ns, err := getWatchedNamespace()
 		if err != nil {
 			setupLog.Error(err, "Failed to get watched namespace from environment")
@@ -81,7 +86,7 @@ func main() {
 		namespace = ns
 	}
 
-	if namespace == "" {
+	if namespace == corev1.NamespaceAll {
 		setupLog.Error(errors.New("no namespace provided"), "Can't run in cluster scope")
 		os.Exit(1)
 	}
@@ -129,16 +134,14 @@ func main() {
 	}
 }
 
-// getWatcedhNamespace returns the Namespace the operator should be watching for changes.
-// An empty value means the operator is running with cluster scope.
+// getWatchedNamespace returns the Namespace the operator should be watching for changes.
+// An empty value means the operator is running with cluster scope (currently unsupported!).
 // Could support multiple, comma separated values, by setting the controller NewCache
 // option with cache.MultiNamespacedCacheBuilder().
 func getWatchedNamespace() (string, error) {
-	const nsEnvVar = "NAMESPACE"
-
-	ns, found := os.LookupEnv(nsEnvVar)
+	ns, found := os.LookupEnv(ENV_NAMESPACE)
 	if !found {
-		return "", fmt.Errorf("environment variable %s should be set", nsEnvVar)
+		return "", fmt.Errorf("environment variable %s should be set", ENV_NAMESPACE)
 	}
 	return ns, nil
 }
