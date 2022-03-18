@@ -6,7 +6,7 @@ require (
 	github.com/caddyserver/caddy v1.0.5
 	github.com/coredns/caddy v1.1.1
 	github.com/coredns/coredns v1.8.3
-	github.com/go-logr/logr v0.4.0
+	github.com/go-logr/logr v1.2.3
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/gorilla/websocket v1.4.1 // indirect
 	github.com/kelseyhightower/envconfig v1.4.0

@@ -243,8 +243,9 @@ github.com/go-logfmt/logfmt v0.5.0/go.mod h1:wCYkCAKZfumFQihp8CzCvQ3paCTfi41vtzG
 github.com/go-logr/logr v0.1.0/go.mod h1:ixOQHD9gLJUVQQ2ZOR7zLEifBX6tGkNJF4QyIY7sIas=
 github.com/go-logr/logr v0.2.0/go.mod h1:z6/tIYblkpsD+a4lm/fGIIU9mZ+XfAiaFtq7xTgseGU=
 github.com/go-logr/logr v0.3.0/go.mod h1:z6/tIYblkpsD+a4lm/fGIIU9mZ+XfAiaFtq7xTgseGU=
-github.com/go-logr/logr v0.4.0 h1:K7/B1jt6fIBQVd4Owv2MqGQClcgf0R266+7C/QjRcLc=
 github.com/go-logr/logr v0.4.0/go.mod h1:z6/tIYblkpsD+a4lm/fGIIU9mZ+XfAiaFtq7xTgseGU=
+github.com/go-logr/logr v1.2.3 h1:2DntVwHkVopvECVRSlL5PSo9eG+cAkDCuckLubN+rq0=
+github.com/go-logr/logr v1.2.3/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/zapr v0.1.0/go.mod h1:tabnROwaDl0UNxkVeFRbY8bwB37GwRv0P8lg6aAiEnk=
 github.com/go-logr/zapr v0.2.0 h1:v6Ji8yBW77pva6NkJKQdHLAJKrIJKRHz0RXwPqCHSR4=
 github.com/go-logr/zapr v0.2.0/go.mod h1:qhKdvif7YF5GI9NWEpyxTSSBdGmzkNguibrdCNVPunU=
@@ -750,13 +751,8 @@ github.com/stretchr/testify v1.5.1/go.mod h1:5W2xD1RspED5o8YsWQXVCued0rvSQ+mT+I5
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.7.0 h1:nwc3DEeHmmLAfoZucVR881uASk0Mfjw8xYJ99tb5CcY=
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
-github.com/submariner-io/admiral v0.12.0-m3.0.20220211050139-69a40598bdd6 h1:RMgMytzHKdn4giyMDnu9oFmT40ea0NX75HcttQCoL/U=
-github.com/submariner-io/admiral v0.12.0-m3.0.20220211050139-69a40598bdd6/go.mod h1:hFPcxH0gAr559/qK7ri10Yh1wyeK6yzow1PIqtBk+30=
 github.com/submariner-io/admiral v0.12.0-rc1 h1:RU9i3yuq6aUYCLoKnDnnJK76svW3rH6l8YOmq00zsuk=
 github.com/submariner-io/admiral v0.12.0-rc1/go.mod h1:2tOba3zraxDT0/iE5K5HTuoFT8IveTLPcDKzfIsuZtI=
-github.com/submariner-io/shipyard v0.12.0-m3/go.mod h1:el/lH6ed/1BN1FvEXlptiib7qT2cTwEQ4AMceH3js9g=
-github.com/submariner-io/shipyard v0.12.0-m3.0.20220217165059-b87e9080b8d1 h1:MY/4ZJfGgw1NN02toflab3k6s5cFtpXwDjlXZy3Bqyw=
-github.com/submariner-io/shipyard v0.12.0-m3.0.20220217165059-b87e9080b8d1/go.mod h1:i3KjrLOHgG1uL+OeYolFNV1BmaOGlh2jEMQfNKtXOAo=
 github.com/submariner-io/shipyard v0.12.0-rc1 h1:qJ1NqifT9EOMB0KjxYlQFHC7KmSmLPstQCkszPfCCDc=
 github.com/submariner-io/shipyard v0.12.0-rc1/go.mod h1:i3KjrLOHgG1uL+OeYolFNV1BmaOGlh2jEMQfNKtXOAo=
 github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhVysOjyk=
