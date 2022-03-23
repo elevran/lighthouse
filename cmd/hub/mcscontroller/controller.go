@@ -16,13 +16,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package mcscontroller
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,6 +34,7 @@ import (
 	mcsv1a1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	"github.com/submariner-io/lighthouse/pkg/lhutil"
+	"github.com/submariner-io/lighthouse/pkg/mcs"
 )
 
 const (
@@ -83,8 +87,12 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, err
 		}
 	}
+	listOptions, err := lhutil.NewServiceExportListFilter(se.ObjectMeta)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
-	result, err := r.reconcile(ctx, lhutil.GetOriginalObjectName(se.ObjectMeta))
+	result, err := r.reconcile(ctx, lhutil.GetOriginalObjectName(se.ObjectMeta), listOptions)
 	if err != nil {
 		return result, err
 	}
@@ -117,14 +125,150 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 // - ServiceImports are owned by the corresponding ServiceExport and are thus
 //	 automatically deleted by k8s when their ServiceExport is deleted.
 //
-func (r *ServiceExportReconciler) reconcile(ctx context.Context, name types.NamespacedName) (ctrl.Result, error) {
-	_ = r.Log.WithValues("service", name)
+func (r *ServiceExportReconciler) reconcile(ctx context.Context, name types.NamespacedName, listOptions *client.ListOptions) (ctrl.Result, error) {
+	log := r.Log.WithValues("service", name)
+	var exports mcsv1a1.ServiceExportList
+	if err := r.Client.List(ctx, &exports, listOptions); err != nil {
+		log.Error(err, "unable to list service's service export")
+		return ctrl.Result{}, err
+	}
+	primary, err := getPrimaryExportObject(exports)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	for _, se := range exports.Items {
+		if se.DeletionTimestamp != nil {
+			continue
+		}
 
-	//------------------------------------------
-	// -- @TODO CODE ABOVE SPECIFIED BEHAVIOR --
-	//------------------------------------------
+		exportSpec := &mcs.ExportSpec{}
+		err := exportSpec.UnmarshalObjectMeta(&se.ObjectMeta)
+		if err != nil {
+			log.Info("Failed to unmarshal exportSpec from %s serviceExport in Namespace %s", se.Name, se.Namespace)
+			return ctrl.Result{}, err
+		}
 
+		err = exportSpec.EnsureCompatible(primary)
+		if err != nil {
+			lhutil.UpdateServiceExportConditions(ctx, &se, log, mcsv1a1.ServiceExportConflict, corev1.ConditionTrue, "", err.Error())
+			err = r.Client.Status().Update(ctx, &se)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			si := mcsv1a1.ServiceImport{}
+			err = r.Client.Get(ctx, name, &si)
+			if err == nil {
+				err = r.Client.Delete(ctx, &si)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+			} else {
+				if !apierrors.IsNotFound(err) {
+					log.Error(err, "Failed to get the service Import to delete")
+					return ctrl.Result{}, err
+				}
+			}
+			continue
+		}
+		lhutil.UpdateServiceExportConditions(ctx, &se, log, mcsv1a1.ServiceExportConflict, corev1.ConditionFalse, "", "successfully update the service export")
+		err = r.Client.Status().Update(ctx, &se)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		err = r.ensureImportFor(ctx, &se)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	return ctrl.Result{}, nil
+}
+
+// getPrimaryExportObject finds the Primary ExportSpec from ServiceExportList.
+// Retruns the ExportSpec object that determined as the primary one from
+// the given ServiceExportList according to the conflict resolution specification set in the
+// KEP, that is implemented in IsPreferredOver method of ExportSpec.
+func getPrimaryExportObject(exportList mcsv1a1.ServiceExportList) (*mcs.ExportSpec, error) {
+	if len(exportList.Items) == 0 {
+		return nil, fmt.Errorf("exportList is empty - couldn't find primary export object")
+	}
+	var primary *mcs.ExportSpec
+	for i, se := range exportList.Items {
+		exportSpec := &mcs.ExportSpec{}
+		err := exportSpec.UnmarshalObjectMeta(&se.ObjectMeta)
+		if err != nil {
+			return nil, err
+		}
+		if i == 0 || exportSpec.IsPreferredOver(primary) {
+			primary = exportSpec
+		}
+	}
+	return primary, nil
+}
+
+// create or update the ServiceImport corresponding to the provided export.
+func (r *ServiceExportReconciler) ensureImportFor(ctx context.Context, se *mcsv1a1.ServiceExport) error {
+	es := &mcs.ExportSpec{}
+
+	err := es.UnmarshalObjectMeta(&se.ObjectMeta)
+	if err != nil {
+		return err
+	}
+
+	namespacedName := types.NamespacedName{
+		Namespace: se.Namespace,
+		Name:      se.Name,
+	}
+	log := r.Log.WithValues("service", namespacedName.Name)
+
+	si := mcsv1a1.ServiceImport{}
+	expected := mcsv1a1.ServiceImport{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespacedName.Namespace,
+			Name:      namespacedName.Name,
+		},
+		Spec: mcsv1a1.ServiceImportSpec{
+			Type:  es.Service.Type,
+			Ports: es.Service.Ports,
+		},
+		Status: mcsv1a1.ServiceImportStatus{
+			// not sure this is the way to update - it's seems like a cluster related field, some kind of a queue of all
+			// the clusters with this service, but here we create si for each se, and se is only of one cluster.
+			// each time it should contain only one cluster (the se cluster?)
+			Clusters: []mcsv1a1.ClusterStatus{{Cluster: lhutil.GetOriginalObjectCluster(se.ObjectMeta)}},
+		},
+	}
+	err = r.Client.Get(ctx, namespacedName, &si)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			err = r.Client.Create(ctx, &expected)
+			if err != nil {
+				log.Error(err, "unable to create the needed Service Import")
+			}
+			return err
+		}
+		log.Error(err, "Failed to get the needed service import")
+		return err
+	}
+	err = r.updateServiceImport(ctx, &si, &expected, log)
+	return err
+}
+
+// update the given ServiceImport to match the expected serviceImport
+func (r *ServiceExportReconciler) updateServiceImport(ctx context.Context, si, expected *mcsv1a1.ServiceImport, log logr.Logger) error {
+	si.Spec.Type = expected.Spec.Type
+	for i, expectedPort := range expected.Spec.Ports {
+		if i < len(si.Spec.Ports) {
+			expectedPort.DeepCopyInto(&si.Spec.Ports[i])
+		} else {
+			si.Spec.Ports = append(si.Spec.Ports, expectedPort)
+		}
+	}
+
+	err := r.Client.Update(ctx, si)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // allow the object to be deleted by removing the finalizer.
@@ -156,12 +300,4 @@ func (r *ServiceExportReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&mcsv1a1.ServiceExport{}).
 		Owns(&mcsv1a1.ServiceImport{}).
 		Complete(r)
-}
-
-// create or update the ServiceImport corresponding to the provided export.
-func (r *ServiceExportReconciler) ensureImportFor(se *mcsv1a1.ServiceExport) error {
-	//---------------------
-	//-- @TODO IMPLEMENT --
-	//---------------------
-	return nil
 }

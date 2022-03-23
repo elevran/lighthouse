@@ -21,7 +21,7 @@ limitations under the License.
 // The controller is responsible for coordinating a common view of exports
 // and imports on a shared (a.k.a. hub) cluster, and replaces the, per-workload-
 // cluster mapping, currently provided by Submariner's lighthouse component.
-package main
+package mcscontroller
 
 import (
 	"errors"

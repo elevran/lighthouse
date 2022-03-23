@@ -19,16 +19,21 @@ limitations under the License.
 package lhutil
 
 import (
+	"context"
 	"fmt"
-	corev1 "k8s.io/api/core/v1"
-	mcsv1a1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
+	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	mcsv1a1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
 
 	lhconst "github.com/submariner-io/lighthouse/pkg/constants"
 )
+
+// MaxExportStatusConditions Maximum number of conditions to keep in ServiceExport.Status at the spoke (FIFO)
+var MaxExportStatusConditions = 10
 
 // GenerateObjectName returns a canonical representation for a fully qualified object.
 // The name should be treated as opaque (i.e., no assumption on the order or
@@ -74,7 +79,7 @@ func Annotate(objmd *metav1.ObjectMeta, name, ns, cluster string) {
 
 // ListFilter creates a filter that can be used to list only matching ServiceExport
 // or ServiceImport objects. It relies on the presence of the Lighthouse labels.
-func ServiceExportListFilter(objmd metav1.ObjectMeta) (*client.ListOptions, error) {
+func NewServiceExportListFilter(objmd metav1.ObjectMeta) (*client.ListOptions, error) {
 	labels := objmd.GetLabels()
 
 	if labels[lhconst.LabelSourceNamespace] == "" || labels[lhconst.LighthouseLabelSourceName] == "" {
@@ -102,6 +107,12 @@ func GetServiceExportCondition(status *mcsv1a1.ServiceExportStatus, ct mcsv1a1.S
 	return latestCond
 }
 
+// check if two serviceExportConditions are equal
+func ServiceExportConditionEqual(c1, c2 *mcsv1a1.ServiceExportCondition) bool {
+	return c1.Type == c2.Type && c1.Status == c2.Status && c1.Reason == c2.Reason &&
+		c1.Message == c2.Message
+}
+
 func CreateServiceExportCondition(ct mcsv1a1.ServiceExportConditionType, cs corev1.ConditionStatus, reason, msg string) *mcsv1a1.ServiceExportCondition {
 	now := metav1.Now()
 	return &mcsv1a1.ServiceExportCondition{
@@ -111,4 +122,43 @@ func CreateServiceExportCondition(ct mcsv1a1.ServiceExportConditionType, cs core
 		Reason:             &reason,
 		Message:            &msg,
 	}
+}
+
+// update the condition field under serviceExport status
+func UpdateServiceExportConditions(ctx context.Context, se *mcsv1a1.ServiceExport, log logr.Logger,
+	conditionType mcsv1a1.ServiceExportConditionType, status corev1.ConditionStatus, reason string, msg string) error {
+	now := metav1.Now()
+	exportCondition := mcsv1a1.ServiceExportCondition{
+		Type:               conditionType,
+		Status:             status,
+		LastTransitionTime: &now,
+		Reason:             (*string)(&reason),
+		Message:            &msg,
+	}
+
+	numCond := len(se.Status.Conditions)
+	if numCond > 0 && ServiceExportConditionEqual(&se.Status.Conditions[numCond-1], &exportCondition) {
+		lastCond := se.Status.Conditions[numCond-1]
+		log.Info("Last ServiceExportCondition equal - not updating status",
+			"condition", lastCond)
+		return nil
+	}
+
+	if numCond >= MaxExportStatusConditions {
+		for i, cond := range se.Status.Conditions {
+			if cond.Type == conditionType {
+				copy(se.Status.Conditions[i:], se.Status.Conditions[i+1:])
+				se.Status.Conditions = se.Status.Conditions[:MaxExportStatusConditions]
+				se.Status.Conditions[MaxExportStatusConditions-1] = exportCondition
+				return nil
+			}
+		}
+		copy(se.Status.Conditions[0:], se.Status.Conditions[1:])
+		se.Status.Conditions = se.Status.Conditions[:MaxExportStatusConditions]
+		se.Status.Conditions[MaxExportStatusConditions-1] = exportCondition
+	} else {
+		se.Status.Conditions = append(se.Status.Conditions, exportCondition)
+	}
+
+	return nil
 }
