@@ -5,8 +5,8 @@ ifneq (,$(DAPPER_HOST_ARCH))
 
 # Running in Dapper
 
-BINARIES := bin/lighthouse-agent bin/lighthouse-coredns bin/hub-mcscontroller
-IMAGES := lighthouse-agent lighthouse-coredns hub-mcscontroller
+BINARIES := bin/lighthouse-agent bin/lighthouse-coredns bin/mcshub
+IMAGES := lighthouse-agent lighthouse-coredns mcshub
 PRELOAD_IMAGES := submariner-gateway submariner-operator submariner-route-agent $(IMAGES)
 SETTINGS = $(DAPPER_SOURCE)/.shipyard.e2e.yml
 
@@ -24,7 +24,7 @@ package/.image.lighthouse-agent: bin/lighthouse-agent
 
 package/.image.lighthouse-coredns: bin/lighthouse-coredns
 
-package/.image.hub-mcscontroller: bin/hub-mcscontroller
+package/.image.mcshub: bin/mcshub
 
 build: $(BINARIES)
 
@@ -34,8 +34,8 @@ bin/lighthouse-agent: vendor/modules.txt $(shell find pkg/agent)
 bin/lighthouse-coredns: vendor/modules.txt $(shell find pkg/coredns)
 	${SCRIPTS_DIR}/compile.sh $@ pkg/coredns/main.go $(BUILD_ARGS)
 
-bin/hub-mcscontroller: vendor/modules.txt $(shell find cmd/hub/mcscontroller)
-	${SCRIPTS_DIR}/compile.sh $@ ./cmd/hub/mcscontroller $(BUILD_ARGS)
+bin/mcshub: vendor/modules.txt $(shell find pkg/mcshub/controller)
+	${SCRIPTS_DIR}/compile.sh $@ ./pkg/mcshub $(BUILD_ARGS)
 
 licensecheck: BUILD_ARGS=--noupx
 licensecheck: $(BINARIES) bin/lichen

@@ -21,7 +21,7 @@ limitations under the License.
 // The controller is responsible for coordinating a common view of exports
 // and imports on a shared (a.k.a. hub) cluster, and replaces the, per-workload-
 // cluster mapping, currently provided by Submariner's lighthouse component.
-package mcscontroller
+package main
 
 import (
 	"errors"
@@ -36,9 +36,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
 	mcsv1a1 "sigs.k8s.io/mcs-api/pkg/apis/v1alpha1"
+
 	// +kubebuilder:scaffold:imports
+
+	mcshub "github.com/submariner-io/lighthouse/pkg/mcshub/controller"
 )
 
 var (
@@ -107,7 +109,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&ServiceExportReconciler{
+	if err = (&mcshub.ServiceExportReconciler{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("ServiceExport"),
 		Scheme: mgr.GetScheme(),
