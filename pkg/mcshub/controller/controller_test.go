@@ -1,4 +1,4 @@
-package mcshub_test
+package controller_test
 
 import (
 	"context"
@@ -21,7 +21,7 @@ import (
 	lhconst "github.com/submariner-io/lighthouse/pkg/constants"
 	"github.com/submariner-io/lighthouse/pkg/lhutil"
 	"github.com/submariner-io/lighthouse/pkg/mcs"
-	mcshub "github.com/submariner-io/lighthouse/pkg/mcshub/controller"
+	"github.com/submariner-io/lighthouse/pkg/mcshub/controller"
 )
 
 const (
@@ -86,7 +86,7 @@ func TestImportGenerated(t *testing.T) {
 	exp, es := prepareServiceExport(t)
 
 	preloadedObjects := []runtime.Object{service, exp}
-	ser := mcshub.ServiceExportReconciler{
+	ser := controller.ServiceExportReconciler{
 		Client: getClient(preloadedObjects),
 		Log:    newLogger(t, false),
 		Scheme: getScheme(),
@@ -129,7 +129,7 @@ func TestImportFromExport(t *testing.T) {
 	exp, es := prepareServiceExport(t)
 
 	preloadedObjects := []runtime.Object{service}
-	ser := mcshub.ServiceExportReconciler{
+	ser := controller.ServiceExportReconciler{
 		Client: getClient(preloadedObjects),
 		Log:    newLogger(t, false),
 		Scheme: getScheme(),
@@ -258,7 +258,7 @@ func Test2ImportsFromExports(t *testing.T) {
 	exp2.Labels[lhconst.LighthouseLabelSourceCluster] = cluster2
 
 	preloadedObjects := []runtime.Object{service, exp1, exp2}
-	ser := mcshub.ServiceExportReconciler{
+	ser := controller.ServiceExportReconciler{
 		Client: getClient(preloadedObjects),
 		Log:    newLogger(t, false),
 		Scheme: getScheme(),
@@ -325,7 +325,7 @@ func TestCreateAndDeleteExport(t *testing.T) {
 	assertions := require.New(t)
 	exp, es := prepareServiceExport(t)
 	preloadedObjects := []runtime.Object{service}
-	ser := mcshub.ServiceExportReconciler{
+	ser := controller.ServiceExportReconciler{
 		Client: getClient(preloadedObjects),
 		Log:    newLogger(t, false),
 		Scheme: getScheme(),
@@ -375,7 +375,7 @@ func TestCreateAndDeleteExport(t *testing.T) {
 func TestUpdateExportWithoutImport(t *testing.T) {
 	exp1, _ := prepareServiceExport(t)
 	preloadedObjects := []runtime.Object{service, exp1}
-	ser := mcshub.ServiceExportReconciler{
+	ser := controller.ServiceExportReconciler{
 		Client: getClient(preloadedObjects),
 		Log:    newLogger(t, false),
 		Scheme: getScheme(),
@@ -402,7 +402,7 @@ func TestUpdateExportWithoutImport(t *testing.T) {
 func TestUpdateExportAndImport(t *testing.T) {
 	exp, es := prepareServiceExport(t)
 	preloadedObjects := []runtime.Object{service, exp}
-	ser := mcshub.ServiceExportReconciler{
+	ser := controller.ServiceExportReconciler{
 		Client: getClient(preloadedObjects),
 		Log:    newLogger(t, false),
 		Scheme: getScheme(),
