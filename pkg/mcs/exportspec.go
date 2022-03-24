@@ -69,23 +69,6 @@ const (
 	AffinityConfigField     = "affinity config"
 )
 
-type CompatibilityError struct {
-	clusterID string
-	field     string
-}
-
-func (err *CompatibilityError) Error() string {
-	if err.field != NameField && err.field != NamespaceField {
-		return fmt.Sprintf("field %s conflicts with value in cluster %s",
-			err.field, err.clusterID)
-	}
-	return "the export refers to a different service and is incompatible"
-}
-
-func (err *CompatibilityError) Cause() string {
-	return err.field
-}
-
 // NewExportSpec creates a new ExportSpec based on the given Service and
 // ServiceExport.
 func NewExportSpec(svc *corev1.Service, export *mcsv1a1.ServiceExport,
@@ -180,30 +163,20 @@ func (es *ExportSpec) IsPreferredOver(another *ExportSpec) bool {
 // Retruns true when the specifications are compatible, otherwise returns
 // false and the name of the conflicting field.
 // @todo do we want to collect a map of the conflicting Global Properties?
-func (es *ExportSpec) EnsureCompatible(another *ExportSpec) error {
+func (es *ExportSpec) IsCompatible(another *ExportSpec) (bool, string) {
 	if es.Name != another.Name {
-		return &CompatibilityError{
-			clusterID: another.ClusterID,
-			field:     NameField}
+		return false, incompatible(NameField, another.ClusterID)
 	}
 	if es.Namespace != another.Namespace {
-		return &CompatibilityError{
-			clusterID: another.ClusterID,
-			field:     NamespaceField}
+		return false, incompatible(NamespaceField, another.ClusterID)
 	}
 
 	if es.Service.Type != another.Service.Type {
-		return &CompatibilityError{
-			clusterID: another.ClusterID,
-			field:     TypeField}
+		return false, incompatible(TypeField, another.ClusterID)
 	} else if es.Service.SessionAffinity != another.Service.SessionAffinity {
-		return &CompatibilityError{
-			clusterID: another.ClusterID,
-			field:     AffinityField}
+		return false, incompatible(AffinityField, another.ClusterID)
 	} else if !reflect.DeepEqual(es.Service.SessionAffinityConfig, another.Service.SessionAffinityConfig) {
-		return &CompatibilityError{
-			clusterID: another.ClusterID,
-			field:     AffinityConfigField}
+		return false, incompatible(AffinityConfigField, another.ClusterID)
 	}
 
 	ports := make(map[string]mcsv1a1.ServicePort, len(es.Service.Ports))
@@ -217,10 +190,15 @@ func (es *ExportSpec) EnsureCompatible(another *ExportSpec) error {
 		if !found {
 			continue
 		} else if !reflect.DeepEqual(current, other) {
-			return &CompatibilityError{
-				clusterID: another.ClusterID,
-				field:     PortField}
+			return false, incompatible(PortField, another.ClusterID)
 		}
 	}
-	return nil
+	return true, ""
+}
+
+func incompatible(field, cluster string) string {
+	if field != NameField && field != NamespaceField {
+		return fmt.Sprintf("field %s conflicts with value in cluster %s", field, cluster)
+	}
+	return "the export refers to a different service and is incompatible"
 }

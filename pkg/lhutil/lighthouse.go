@@ -20,7 +20,6 @@ package lhutil
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -77,25 +76,21 @@ func Annotate(objmd *metav1.ObjectMeta, name, ns, cluster string) {
 	metav1.SetMetaDataAnnotation(objmd, lhconst.OriginName, name)
 }
 
-// ListFilter creates a filter that can be used to list only matching ServiceExport
-// or ServiceImport objects. It relies on the presence of the Lighthouse labels.
-func NewServiceExportListFilter(objmd metav1.ObjectMeta) (*client.ListOptions, error) {
-	labels := objmd.GetLabels()
-
-	if labels[lhconst.LabelSourceNamespace] == "" || labels[lhconst.LighthouseLabelSourceName] == "" {
-		return nil, fmt.Errorf("%s missing lighthouse labels", objmd.GetName())
-	}
-
+// NewServiceExportListFilter creates a filter that can be used to list only matching
+// ServiceExport or ServiceImport objects.
+func NewServiceExportListFilter(labels types.NamespacedName, namespace string) (*client.ListOptions, error) {
 	opts := &client.ListOptions{}
 
-	client.InNamespace(objmd.GetNamespace()).ApplyToList(opts)
+	client.InNamespace(namespace).ApplyToList(opts)
 	client.MatchingLabels{
-		lhconst.LabelSourceNamespace:      labels[lhconst.LabelSourceNamespace],
-		lhconst.LighthouseLabelSourceName: labels[lhconst.LighthouseLabelSourceName],
+		lhconst.LabelSourceNamespace:      labels.Namespace,
+		lhconst.LighthouseLabelSourceName: labels.Name,
 	}.ApplyToList(opts)
 	return opts, nil
 }
 
+// GetServiceExportCondition retrieves the state of latest service export Status.Condition of the
+// provided type.
 func GetServiceExportCondition(status *mcsv1a1.ServiceExportStatus, ct mcsv1a1.ServiceExportConditionType) *mcsv1a1.ServiceExportCondition {
 	var latestCond *mcsv1a1.ServiceExportCondition = nil
 	for _, c := range status.Conditions {
@@ -107,12 +102,14 @@ func GetServiceExportCondition(status *mcsv1a1.ServiceExportStatus, ct mcsv1a1.S
 	return latestCond
 }
 
-// check if two serviceExportConditions are equal
+// ServiceExportConditionEqual checks if two serviceExportConditions are equal
 func ServiceExportConditionEqual(c1, c2 *mcsv1a1.ServiceExportCondition) bool {
 	return c1.Type == c2.Type && c1.Status == c2.Status && c1.Reason == c2.Reason &&
 		c1.Message == c2.Message
 }
 
+// CreateServiceExportCondition is a convenience constructor for Status.Conditions
+//
 func CreateServiceExportCondition(ct mcsv1a1.ServiceExportConditionType, cs corev1.ConditionStatus, reason, msg string) *mcsv1a1.ServiceExportCondition {
 	now := metav1.Now()
 	return &mcsv1a1.ServiceExportCondition{
@@ -124,7 +121,9 @@ func CreateServiceExportCondition(ct mcsv1a1.ServiceExportConditionType, cs core
 	}
 }
 
-// update the condition field under serviceExport status
+// UpdateServiceExportConditions appends the condition field under ServiceExport status.
+// It trims the condition array if over some limit, preferring to remove the previous condition
+// of the same type when possible.
 func UpdateServiceExportConditions(ctx context.Context, se *mcsv1a1.ServiceExport, log logr.Logger,
 	conditionType mcsv1a1.ServiceExportConditionType, status corev1.ConditionStatus, reason string, msg string) error {
 	now := metav1.Now()

@@ -71,7 +71,7 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if apierrors.IsNotFound(err) {
 			log.Info("No ServiceExport found")
 		} else {
-			// @tdo avoid requeuing for now. Revisit once we see what errors do show.
+			// @todo avoid requeuing for now. Revisit once we see what errors do show.
 			log.Error(err, "Error fetching ServiceExport")
 		}
 		return ctrl.Result{}, nil
@@ -87,12 +87,8 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, err
 		}
 	}
-	listOptions, err := lhutil.NewServiceExportListFilter(se.ObjectMeta)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
 
-	result, err := r.reconcile(ctx, lhutil.GetOriginalObjectName(se.ObjectMeta), listOptions)
+	result, err := r.reconcile(ctx, lhutil.GetOriginalObjectName(se.ObjectMeta), se.GetNamespace())
 	if err != nil {
 		return result, err
 	}
@@ -123,19 +119,27 @@ func (r *ServiceExportReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 //   deleted object and we can't access its labels). The finalizer is cleared when we
 // 	 receive a notification for change in an object scheduled for deletion.
 // - ServiceImports are owned by the corresponding ServiceExport and are thus
-//	 automatically deleted by k8s when their ServiceExport is deleted.
+//	 automatically garbage collected by k8s when their ServiceExport is deleted.
 //
-func (r *ServiceExportReconciler) reconcile(ctx context.Context, name types.NamespacedName, listOptions *client.ListOptions) (ctrl.Result, error) {
+func (r *ServiceExportReconciler) reconcile(ctx context.Context, name types.NamespacedName, objNS string) (ctrl.Result, error) {
 	log := r.Log.WithValues("service", name)
+
+	listOptions, err := lhutil.NewServiceExportListFilter(name, objNS)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	var exports mcsv1a1.ServiceExportList
 	if err := r.Client.List(ctx, &exports, listOptions); err != nil {
 		log.Error(err, "unable to list service's service export")
 		return ctrl.Result{}, err
 	}
+
 	primary, err := getPrimaryExportObject(exports)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+
 	for _, se := range exports.Items {
 		if se.DeletionTimestamp != nil {
 			continue
@@ -148,16 +152,19 @@ func (r *ServiceExportReconciler) reconcile(ctx context.Context, name types.Name
 			return ctrl.Result{}, err
 		}
 
-		err = exportSpec.EnsureCompatible(primary)
-		if err != nil {
-			lhutil.UpdateServiceExportConditions(ctx, &se, log, mcsv1a1.ServiceExportConflict, corev1.ConditionTrue, "", err.Error())
+		compatible, message := exportSpec.IsCompatible(primary)
+		if !compatible {
+			log.Info("Marking export %s as conflicting: %s", se.GetName(), message)
+			lhutil.UpdateServiceExportConditions(ctx, &se, log, mcsv1a1.ServiceExportConflict, corev1.ConditionTrue, "", message)
 			err = r.Client.Status().Update(ctx, &se)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
+
 			si := mcsv1a1.ServiceImport{}
 			err = r.Client.Get(ctx, name, &si)
 			if err == nil {
+				log.Info("Deleting import %s due to conflict", name)
 				err = r.Client.Delete(ctx, &si)
 				if err != nil {
 					return ctrl.Result{}, err
@@ -170,11 +177,14 @@ func (r *ServiceExportReconciler) reconcile(ctx context.Context, name types.Name
 			}
 			continue
 		}
+
+		log.Info("Marking export %s as non-conflicting", se.GetName())
 		lhutil.UpdateServiceExportConditions(ctx, &se, log, mcsv1a1.ServiceExportConflict, corev1.ConditionFalse, "", "successfully update the service export")
 		err = r.Client.Status().Update(ctx, &se)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+		log.Info("Ensuring import exists for export %s", se.GetName())
 		err = r.ensureImportFor(ctx, &se)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -191,8 +201,12 @@ func getPrimaryExportObject(exportList mcsv1a1.ServiceExportList) (*mcs.ExportSp
 	if len(exportList.Items) == 0 {
 		return nil, fmt.Errorf("exportList is empty - couldn't find primary export object")
 	}
+
 	var primary *mcs.ExportSpec
 	for i, se := range exportList.Items {
+		if se.GetDeletionTimestamp() != nil {
+			continue
+		}
 		exportSpec := &mcs.ExportSpec{}
 		err := exportSpec.UnmarshalObjectMeta(&se.ObjectMeta)
 		if err != nil {
@@ -231,12 +245,10 @@ func (r *ServiceExportReconciler) ensureImportFor(ctx context.Context, se *mcsv1
 			Ports: es.Service.Ports,
 		},
 		Status: mcsv1a1.ServiceImportStatus{
-			// not sure this is the way to update - it's seems like a cluster related field, some kind of a queue of all
-			// the clusters with this service, but here we create si for each se, and se is only of one cluster.
-			// each time it should contain only one cluster (the se cluster?)
 			Clusters: []mcsv1a1.ClusterStatus{{Cluster: lhutil.GetOriginalObjectCluster(se.ObjectMeta)}},
 		},
 	}
+
 	err = r.Client.Get(ctx, namespacedName, &si)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -249,12 +261,14 @@ func (r *ServiceExportReconciler) ensureImportFor(ctx context.Context, se *mcsv1
 		log.Error(err, "Failed to get the needed service import")
 		return err
 	}
-	err = r.updateServiceImport(ctx, &si, &expected, log)
+	err = r.updateServiceImport(ctx, &si, &expected)
 	return err
 }
 
 // update the given ServiceImport to match the expected serviceImport
-func (r *ServiceExportReconciler) updateServiceImport(ctx context.Context, si, expected *mcsv1a1.ServiceImport, log logr.Logger) error {
+func (r *ServiceExportReconciler) updateServiceImport(ctx context.Context, si, expected *mcsv1a1.ServiceImport) error {
+	// @todo: only update when something changed so compare the relevant fields before calling Update
+	// @todo: requeue, in caller, if update fails (e.g., due to conflict)
 	si.Spec.Type = expected.Spec.Type
 	for i, expectedPort := range expected.Spec.Ports {
 		if i < len(si.Spec.Ports) {
@@ -265,10 +279,7 @@ func (r *ServiceExportReconciler) updateServiceImport(ctx context.Context, si, e
 	}
 
 	err := r.Client.Update(ctx, si)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 // allow the object to be deleted by removing the finalizer.
